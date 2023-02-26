@@ -9,3 +9,6 @@ python3 log-indexing.py --file="${TRIGGER_LOGGING}.json" >"${TRIGGER_LOGGING}.in
 
 python3 log-analysis.py --file="${TRIGGER_LOGGING}.indexed.json" >"${TRIGGER_LOGGING}.analysis.md"
 ```
+
+TODO:
+- [ ] add in a nix configuration script for setting up analysis environment

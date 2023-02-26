@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import json
 import os.path
 import pandas as pd
@@ -12,8 +13,8 @@ examples = 10
 def parse_datetime(datetime_str):
 	return datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S.%f").timestamp()
 
-def datetime_second_roundup(epoch_time):
-	return datetime.fromtimestamp(epoch_time).strftime("%Y-%m-%d %H:%M:%S")
+def datetime_roundup(epoch_time):
+	return datetime.fromtimestamp(epoch_time).strftime("%Y-%m-%d %H:%M")
 
 def get_transaction_events(rule):
 	def get_contract(event):
@@ -174,11 +175,45 @@ def pretty_print_command(cmd):
 	elif cmd["type"] == 'ExerciseByKeyCommand':
 		return "{0} exercised choice {1} on template {2} using contact key {3}".format(cmd["type"], cmd["choice"], cmd["templateId"], cmd["contractKey"])
 
-def build_message_dataframe(messages):
-	data = {'message-wait-time': [(messages[cmd]["rule-start-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'total-processing-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'rule-evaluation-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["rule-start-time"]) for cmd in messages]}
+def build_message_dataframe(messages, with_datetime=False):
+	if with_datetime:
+		data = {'datetime': [datetime_roundup(messages[cmd]["message-arrival-time"]) for cmd in messages], 'message-wait-time': [(messages[cmd]["rule-start-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'total-processing-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'rule-evaluation-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["rule-start-time"]) for cmd in messages]}
+	else:
+		data = {'message-wait-time': [(messages[cmd]["rule-start-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'total-processing-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'rule-evaluation-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["rule-start-time"]) for cmd in messages]}		
 	return pd.DataFrame(data=data)
 
-def analyse(json_data, id):
+def build_completion_arrival_dataframe(received, processed):
+	def wait_count(rules):
+		return len([ rule for rule in rules if rule not in processed ])
+	def processed_count(rules):
+		return len([ rule for rule in rules if rule in processed ])
+	groups = [ (dt, list(rules)) for (dt, rules) in itertools.groupby(received, key=lambda rule: datetime_roundup(get_completion_arrival_time(rule))) ]
+	data = {'datetime': [item[0] for item in groups], 'waiting': [wait_count(item[1]) for item in groups], 'processed': [processed_count(item[1]) for item in groups]}
+	return pd.DataFrame(data=data)
+
+def build_transaction_arrival_dataframe(received, processed):
+	def wait_count(rules):
+		return len([ rule for rule in rules if rule not in processed ])
+	def processed_count(rules):
+		return len([ rule for rule in rules if rule in processed ])
+	groups = [ (dt, list(rules)) for (dt, rules) in itertools.groupby(received, key=lambda rule: datetime_roundup(get_transaction_arrival_time(rule))) ]
+	data = {'datetime': [item[0] for item in groups], 'waiting': [wait_count(item[1]) for item in groups], 'processed': [processed_count(item[1]) for item in groups]}
+	return pd.DataFrame(data=data)
+
+def build_submission_dataframe(submissions):
+	def create_commands(rules):
+		return len([ rule for rule in rules for cmd in get_submission_command(rule)[1]["commands"] if cmd["type"] == "CreateCommand" ])
+	def exercise_commands(rules):
+		return len([ rule for rule in rules for cmd in get_submission_command(rule)[1]["commands"] if cmd["type"] == "ExerciseCommand" ])
+	def create_and_exercise_commands(rules):
+		return len([ rule for rule in rules for cmd in get_submission_command(rule)[1]["commands"] if cmd["type"] == "CreateAndExerciseCommand" ])
+	def exercise_by_key_commands(rules):
+		return len([ rule for rule in rules for cmd in get_submission_command(rule)[1]["commands"] if cmd["type"] == "ExerciseByKeyCommand" ])
+	groups = [ (dt, list(rules)) for (dt, rules) in itertools.groupby(submissions, key=lambda rule: datetime_roundup(get_submission_command(rule)[1]["timestamp"])) ]
+	data = {'datetime': [item[0] for item in groups], 'CreateCommand': [create_commands(item[1]) for item in groups], 'ExerciseCommand': [exercise_commands(item[1]) for item in groups], 'CreateAndExerciseCommand': [create_and_exercise_commands(item[1]) for item in groups], 'ExerciseByKeyCommand': [exercise_by_key_commands(item[1]) for item in groups]}
+	return pd.DataFrame(data=data)
+
+def analyse(json_data, id, name):
 	trigger = [ child for child in json_data["root"]["children"] if child["span"] == id ][0]
 	events = trigger["events"]
 	assert set([event["message"] for event in trigger["events"]]) == set(['Subscribing to ledger API transaction source', 'Subscribing to ledger API completion source', 'No heartbeat source configured'])
@@ -216,6 +251,9 @@ def analyse(json_data, id):
 			print("    - {0} submissions with commands:".format(len([s for s in submission_type if s == submission])))
 			for cmd in submission:
 				print("      - {0}".format(pretty_print_command(cmd)))
+	df = build_submission_dataframe(update_submissions)
+	fig = px.bar(df, x="datetime", y=["CreateCommand", "ExerciseCommand", "CreateAndExerciseCommand", "ExerciseByKeyCommand"], title="Ledger command submissions for {0}".format(name))
+	fig.show()
 	correlated_update_submissions = dict([ get_submission_command(rule) for rule in update_submissions ])
 	completions_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Completion source' ]
 	completions_processed = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Completion source' and "children" in rule ]
@@ -242,6 +280,9 @@ def analyse(json_data, id):
 	df = build_message_dataframe(correlated_completion_successes)
 	print(df.describe())
 	print("```")
+	df = build_message_dataframe(correlated_completion_successes, with_datetime=True)
+	fig = px.bar(df, x="datetime", y=["message-wait-time", "total-processing-time", "rule-evaluation-time"], title="Successful completion message timings for {0}".format(name))
+	fig.show()
 	print("")
 	print("  - Failed completion message timing statistics:")
 	print("")
@@ -249,8 +290,10 @@ def analyse(json_data, id):
 	df = build_message_dataframe(correlated_completion_failures)
 	print(df.describe())
 	print("```")
+	df = build_message_dataframe(correlated_completion_failures, with_datetime=True)
+	fig = px.bar(df, x="datetime", y=["message-wait-time", "total-processing-time", "rule-evaluation-time"], title="Failed completion message timings for {0}".format(name))
+	fig.show()
 	print("")
-	# TODO: graph completion outcomes against timestamp - save to file	
 	transactions_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Transaction source' ]
 	transactions_processed = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Transaction source' and "children" in rule ]
 	print("  - Transaction messages:")
@@ -274,8 +317,16 @@ def analyse(json_data, id):
 	df = build_message_dataframe(correlated_transaction_events)
 	print(df.describe())
 	print("```")
+	df = build_message_dataframe(correlated_transaction_events, with_datetime=True)
+	fig = px.bar(df, x="datetime", y=["message-wait-time", "total-processing-time", "rule-evaluation-time"], title="Transaction message timings for {0}".format(name))
+	fig.show()
 	print("")
-	# TODO: graph transaction outcomes against timestamp - save to file
+	df = build_completion_arrival_dataframe(completions_received, completions_processed)
+	fig = px.bar(df, x="datetime", y=["processed", "waiting"], title="Completion message arrivals for {0}".format(name))
+	fig.show()
+	df = build_transaction_arrival_dataframe(transactions_received, transactions_processed)
+	fig = px.bar(df, x="datetime", y=["processed", "waiting"], title="Transaction message arrivals for {0}".format(name))
+	fig.show()
 	heartbeats_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Heartbeat source' ]
 	heartbeats_processed = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Heartbeat source' and "children" in rule ]
 	print("  - Heartbeat messages:")
@@ -286,13 +337,11 @@ def analyse(json_data, id):
 		print("    - no submissions produced by heartbeat message processing")
 	else:
 		print("    - {0} heartbeat message rule updates produced submissions".format(len(submissions)))
-	# TODO: graph submission outcomes against timestamp - save to file
 	in_flight_commands = [ cmd for cmd in correlated_update_submissions if cmd not in correlated_completion_failures and cmd not in correlated_completion_successes and cmd not in correlated_transaction_events ]
 	partial_in_flight_commands = [ cmd for cmd in correlated_update_submissions if (cmd in correlated_completion_failures or cmd in correlated_completion_successes) and cmd not in correlated_transaction_events ]
 	print("  - {0} commands are currently in-flight".format(len(in_flight_commands) + len(partial_in_flight_commands)))
 	print("    - waiting for {0} command completions".format(len(in_flight_commands)))
 	print("    - waiting for {0} transaction events".format(len(partial_in_flight_commands)))
-	# TODO: graph in-flight outcomes against timestamp - save to file
 	unexpected_completion_failures = [ cmd for cmd in correlated_completion_failures if cmd not in correlated_update_submissions ]
 	if len(unexpected_completion_failures) > 0:
 		print("  - Received {0} completion failures with no corresponding command submission".format(len(unexpected_completion_failures)))
@@ -350,7 +399,6 @@ def analyse(json_data, id):
 		if len(missing_contracts[template]) > 0:
 			print("      - detected {0} archived contracts with no create event".format(len(missing_contracts[template])))
 			print("        - example contract IDs: {0}".format(missing_contracts[template][:examples]))
-	# TODO: graph ACS outcomes against timestamp - save to file
 
 def main(args):
 	with open(os.path.abspath(os.path.expanduser(args.file))) as fd:
@@ -359,15 +407,15 @@ def main(args):
 	ProcessFinalTcPdfUploaded = [ child["span"] for child in json_data["root"]["children"] if child["name"] == "trigger.rule" and "D7.DIExecution.Trigger.ProcessFinalTcPdfUploaded" in json.dumps(child) ]
 	IssuanceRequestFromDxxl = [ child["span"] for child in json_data["root"]["children"] if child["name"] == "trigger.rule" and "D7.DIExecution.Trigger.IssuanceRequestFromDxxl" in json.dumps(child) ]
 	
-	print("# Trigger D7.DIExecution.Trigger.ProcessFinalTcPdfUploaded")
-	print("  No restarts detected for ProcessFinalTcPdfUploaded") if len(ProcessFinalTcPdfUploaded) == 1 else print("  ProcessFinalTcPdfUploaded has restarted {0} times".format(len(ProcessFinalTcPdfUploaded)))
 	for id in ProcessFinalTcPdfUploaded:
-		analyse(json_data, id)
+		print("# Trigger D7.DIExecution.Trigger.ProcessFinalTcPdfUploaded ({0})".format(id))
+		print("  No restarts detected for ProcessFinalTcPdfUploaded") if len(ProcessFinalTcPdfUploaded) == 1 else print("  ProcessFinalTcPdfUploaded has restarted {0} times".format(len(ProcessFinalTcPdfUploaded)))
+		analyse(json_data, id, "D7.DIExecution.Trigger.ProcessFinalTcPdfUploaded")
 	print("")
-	print("# Trigger D7.DIExecution.Trigger.IssuanceRequestFromDxxl")
-	print("  No restarts detected for IssuanceRequestFromDxxl") if len(IssuanceRequestFromDxxl) == 1 else print("  IssuanceRequestFromDxxl has restarted {0} times".format(len(IssuanceRequestFromDxxl)))
 	for id in IssuanceRequestFromDxxl:
-		analyse(json_data, id)
+		print("# Trigger D7.DIExecution.Trigger.IssuanceRequestFromDxxl ({0})".format(id))
+		print("  No restarts detected for IssuanceRequestFromDxxl") if len(IssuanceRequestFromDxxl) == 1 else print("  IssuanceRequestFromDxxl has restarted {0} times".format(len(IssuanceRequestFromDxxl)))
+		analyse(json_data, id, "D7.DIExecution.Trigger.IssuanceRequestFromDxxl")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyse trigger logging data")
