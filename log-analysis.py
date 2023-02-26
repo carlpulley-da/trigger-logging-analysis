@@ -188,7 +188,7 @@ def build_completion_arrival_dataframe(received, processed):
 	def processed_count(rules):
 		return len([ rule for rule in rules if rule in processed ])
 	groups = [ (dt, list(rules)) for (dt, rules) in itertools.groupby(received, key=lambda rule: datetime_roundup(get_completion_arrival_time(rule))) ]
-	data = {'datetime': [item[0] for item in groups], 'waiting': [wait_count(item[1]) for item in groups], 'processed': [processed_count(item[1]) for item in groups]}
+	data = {'datetime': [item[0] for item in groups], 'hidden': [wait_count(item[1]) for item in groups], 'processed': [processed_count(item[1]) for item in groups]}
 	return pd.DataFrame(data=data)
 
 def build_transaction_arrival_dataframe(received, processed):
@@ -197,7 +197,7 @@ def build_transaction_arrival_dataframe(received, processed):
 	def processed_count(rules):
 		return len([ rule for rule in rules if rule in processed ])
 	groups = [ (dt, list(rules)) for (dt, rules) in itertools.groupby(received, key=lambda rule: datetime_roundup(get_transaction_arrival_time(rule))) ]
-	data = {'datetime': [item[0] for item in groups], 'waiting': [wait_count(item[1]) for item in groups], 'processed': [processed_count(item[1]) for item in groups]}
+	data = {'datetime': [item[0] for item in groups], 'hidden': [wait_count(item[1]) for item in groups], 'processed': [processed_count(item[1]) for item in groups]}
 	return pd.DataFrame(data=data)
 
 def build_submission_dataframe(submissions):
@@ -258,7 +258,7 @@ def analyse(json_data, id, name):
 	completions_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Completion source' ]
 	completions_processed = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Completion source' and "children" in rule ]
 	print("  - Completion messages:")
-	print("    - {0} completions received and unprocessed".format(len(completions_received) - len(completions_processed)))
+	print("    - {0} completions received and hidden".format(len(completions_received) - len(completions_processed)))
 	print("    - {0} completions processed".format(len(completions_processed)))
 	completion_failures = [ rule for rule in completions_processed for event in rule["events"] if event["message"] == 'Completion source' and "details" in event and "message" in event["details"] and "status" in event["details"]["message"] and event["details"]["message"]["status"] != 0 ]
 	completion_successes = [ rule for rule in completions_processed for event in rule["events"] if event["message"] == 'Completion source' and "details" in event and "message" in event["details"] and "status" in event["details"]["message"] and event["details"]["message"]["status"] == 0 ]
@@ -297,7 +297,7 @@ def analyse(json_data, id, name):
 	transactions_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Transaction source' ]
 	transactions_processed = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Transaction source' and "children" in rule ]
 	print("  - Transaction messages:")
-	print("    - {0} transactions received and unprocessed".format(len(transactions_received) - len(transactions_processed)))
+	print("    - {0} transactions received and hidden".format(len(transactions_received) - len(transactions_processed)))
 	print("    - {0} transactions processed".format(len(transactions_processed)))
 	transaction_events = []
 	for rule in transactions_processed:
@@ -322,15 +322,15 @@ def analyse(json_data, id, name):
 	fig.show()
 	print("")
 	df = build_completion_arrival_dataframe(completions_received, completions_processed)
-	fig = px.bar(df, x="datetime", y=["processed", "waiting"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Number of messages"), title="Completion message arrivals for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["processed", "hidden"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Number of messages"), title="Completion message arrivals for {0}".format(name))
 	fig.show()
 	df = build_transaction_arrival_dataframe(transactions_received, transactions_processed)
-	fig = px.bar(df, x="datetime", y=["processed", "waiting"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Number of messages"), title="Transaction message arrivals for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["processed", "hidden"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Number of messages"), title="Transaction message arrivals for {0}".format(name))
 	fig.show()
 	heartbeats_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Heartbeat source' ]
 	heartbeats_processed = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Heartbeat source' and "children" in rule ]
 	print("  - Heartbeat messages:")
-	print("    - {0} heartbeats received and unprocessed".format(len(heartbeats_received) - len(heartbeats_processed)))
+	print("    - {0} heartbeats received and hidden".format(len(heartbeats_received) - len(heartbeats_processed)))
 	print("    - {0} heartbeats processed".format(len(heartbeats_processed)))
 	submissions = [ rule for rule in heartbeats_processed if rule in update_submissions ]
 	if len(submissions) == 0:
@@ -340,8 +340,8 @@ def analyse(json_data, id, name):
 	in_flight_commands = [ cmd for cmd in correlated_update_submissions if cmd not in correlated_completion_failures and cmd not in correlated_completion_successes and cmd not in correlated_transaction_events ]
 	partial_in_flight_commands = [ cmd for cmd in correlated_update_submissions if (cmd in correlated_completion_failures or cmd in correlated_completion_successes) and cmd not in correlated_transaction_events ]
 	print("  - {0} commands are currently in-flight".format(len(in_flight_commands) + len(partial_in_flight_commands)))
-	print("    - waiting for {0} command completions".format(len(in_flight_commands)))
-	print("    - waiting for {0} transaction events".format(len(partial_in_flight_commands)))
+	print("    - hidden {0} command completions".format(len(in_flight_commands)))
+	print("    - hidden {0} transaction events".format(len(partial_in_flight_commands)))
 	unexpected_completion_failures = [ cmd for cmd in correlated_completion_failures if cmd not in correlated_update_submissions ]
 	if len(unexpected_completion_failures) > 0:
 		print("  - Received {0} completion failures with no corresponding command submission".format(len(unexpected_completion_failures)))
