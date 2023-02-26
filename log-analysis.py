@@ -340,8 +340,8 @@ def analyse(json_data, id, name):
 	in_flight_commands = [ cmd for cmd in correlated_update_submissions if cmd not in correlated_completion_failures and cmd not in correlated_completion_successes and cmd not in correlated_transaction_events ]
 	partial_in_flight_commands = [ cmd for cmd in correlated_update_submissions if (cmd in correlated_completion_failures or cmd in correlated_completion_successes) and cmd not in correlated_transaction_events ]
 	print("  - {0} commands are currently in-flight".format(len(in_flight_commands) + len(partial_in_flight_commands)))
-	print("    - hidden {0} command completions".format(len(in_flight_commands)))
-	print("    - hidden {0} transaction events".format(len(partial_in_flight_commands)))
+	print("    - waiting on {0} command completions".format(len(in_flight_commands)))
+	print("    - waiting on {0} transaction events".format(len(partial_in_flight_commands)))
 	unexpected_completion_failures = [ cmd for cmd in correlated_completion_failures if cmd not in correlated_update_submissions ]
 	if len(unexpected_completion_failures) > 0:
 		print("  - Received {0} completion failures with no corresponding command submission".format(len(unexpected_completion_failures)))
