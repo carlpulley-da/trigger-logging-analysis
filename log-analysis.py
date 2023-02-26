@@ -177,7 +177,7 @@ def pretty_print_command(cmd):
 
 def build_message_dataframe(messages, with_datetime=False):
 	if with_datetime:
-		data = {'datetime': [datetime_roundup(messages[cmd]["message-arrival-time"]) for cmd in messages], 'message-wait-time': [(messages[cmd]["rule-start-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'total-processing-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'rule-evaluation-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["rule-start-time"]) for cmd in messages]}
+		data = {'datetime': [datetime_roundup(messages[cmd]["message-arrival-time"]) for cmd in messages], 'message-wait-time': [(messages[cmd]["rule-start-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'rule-evaluation-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["rule-start-time"]) for cmd in messages]}
 	else:
 		data = {'message-wait-time': [(messages[cmd]["rule-start-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'total-processing-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["message-arrival-time"]) for cmd in messages], 'rule-evaluation-time': [(messages[cmd]["rule-end-time"] - messages[cmd]["rule-start-time"]) for cmd in messages]}		
 	return pd.DataFrame(data=data)
@@ -252,7 +252,7 @@ def analyse(json_data, id, name):
 			for cmd in submission:
 				print("      - {0}".format(pretty_print_command(cmd)))
 	df = build_submission_dataframe(update_submissions)
-	fig = px.bar(df, x="datetime", y=["CreateCommand", "ExerciseCommand", "CreateAndExerciseCommand", "ExerciseByKeyCommand"], title="Ledger command submissions for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["CreateCommand", "ExerciseCommand", "CreateAndExerciseCommand", "ExerciseByKeyCommand"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Number of commands"), title="Ledger command submissions for {0}".format(name))
 	fig.show()
 	correlated_update_submissions = dict([ get_submission_command(rule) for rule in update_submissions ])
 	completions_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Completion source' ]
@@ -281,7 +281,7 @@ def analyse(json_data, id, name):
 	print(df.describe())
 	print("```")
 	df = build_message_dataframe(correlated_completion_successes, with_datetime=True)
-	fig = px.bar(df, x="datetime", y=["message-wait-time", "total-processing-time", "rule-evaluation-time"], title="Successful completion message timings for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["message-wait-time", "rule-evaluation-time"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Time (seconds)"), title="Successful completion message timings for {0}".format(name))
 	fig.show()
 	print("")
 	print("  - Failed completion message timing statistics:")
@@ -291,7 +291,7 @@ def analyse(json_data, id, name):
 	print(df.describe())
 	print("```")
 	df = build_message_dataframe(correlated_completion_failures, with_datetime=True)
-	fig = px.bar(df, x="datetime", y=["message-wait-time", "total-processing-time", "rule-evaluation-time"], title="Failed completion message timings for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["message-wait-time", "rule-evaluation-time"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Time (seconds)"), title="Failed completion message timings for {0}".format(name))
 	fig.show()
 	print("")
 	transactions_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Transaction source' ]
@@ -318,14 +318,14 @@ def analyse(json_data, id, name):
 	print(df.describe())
 	print("```")
 	df = build_message_dataframe(correlated_transaction_events, with_datetime=True)
-	fig = px.bar(df, x="datetime", y=["message-wait-time", "total-processing-time", "rule-evaluation-time"], title="Transaction message timings for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["message-wait-time", "rule-evaluation-time"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Time (seconds)"), title="Transaction message timings for {0}".format(name))
 	fig.show()
 	print("")
 	df = build_completion_arrival_dataframe(completions_received, completions_processed)
-	fig = px.bar(df, x="datetime", y=["processed", "waiting"], title="Completion message arrivals for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["processed", "waiting"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Number of messages"), title="Completion message arrivals for {0}".format(name))
 	fig.show()
 	df = build_transaction_arrival_dataframe(transactions_received, transactions_processed)
-	fig = px.bar(df, x="datetime", y=["processed", "waiting"], title="Transaction message arrivals for {0}".format(name))
+	fig = px.bar(df, x="datetime", y=["processed", "waiting"], labels=dict(datetime="Datetime (1 minutes buckets)", value="Number of messages"), title="Transaction message arrivals for {0}".format(name))
 	fig.show()
 	heartbeats_received = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Heartbeat source' ]
 	heartbeats_processed = [ rule for rule in update_events for event in rule["events"] if event["message"] == 'Heartbeat source' and "children" in rule ]
